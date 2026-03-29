@@ -1,12 +1,79 @@
 # PawPal+ Project Reflection
 
 ## 1. System Design
+- A user should enter basic owner + pet info
+- A user should be able add/edit tasks (duration + priority at minimum)
+- Daily schedule/plan based on constraints and priorities
+
 
 **a. Initial design**
 
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
+1. PetOwner
+
+Attributes:
+
+name
+available_time_per_day (in minutes or hours)
+preferences (e.g., preferred walk times, task priorities)
+
+Methods:
+
+add_task(task)
+remove_task(task)
+get_tasks()
+
+2. Pet
+
+Attributes:
+
+name
+type (dog, cat, etc.)
+age
+special_needs (e.g., medication, diet)
+
+Methods:
+
+get_pet_info()
+
+3. Task
+
+(This is the most important object)
+
+Attributes:
+
+name (e.g., “Morning Walk”)
+duration (in minutes)
+priority (e.g., high, medium, low OR numeric)
+category (feeding, walking, grooming, etc.)
+frequency (daily, weekly)
+
+Methods:
+
+update_priority(new_priority)
+update_duration(new_duration)
+get_task_details()
+
+4. Schedule
+
+(Represents the daily plan)
+
+Attributes:
+
+tasks (list of Task objects)
+total_time_used
+remaining_time
+
+Methods:
+
+add_task(task)
+remove_task(task)
+calculate_total_time()
+display_schedule()
+
+    
 **b. Design changes**
 
 - Did your design change during implementation?
