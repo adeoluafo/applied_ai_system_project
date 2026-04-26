@@ -235,3 +235,16 @@ During the Module 4 upgrade, I asked the AI how to eliminate the boilerplate set
 **One instance where the AI suggestion was flawed or incorrect**
 
 The original `detect_time_conflicts()` implementation — which the AI helped design — grouped all tasks by their start time string and flagged any group with more than one task. This looked correct and passed all the conflict tests at the time. The flaw was that it only caught tasks scheduled at the *identical* start time. A 60-minute walk at 08:00 and a feeding at 08:30 — tasks that physically cannot both be done simultaneously — produced no warning at all.
+
+### What I learned
+
+Writing tests before finding the blind spots forced me to think about what the code actually promises, not just what it does in the happy path. The duration-overlap bug had existed since the original implementation but was invisible because all early tests used identical start times. Writing a new scenario-driven test (`test_detect_duration_based_overlap`) was what revealed it — the production fix followed in two lines.
+
+Confidence scoring turned out to be more useful than I expected. A score of 0.85 communicates more to an owner than a list of warning strings, and testing the score forced me to define what "reliable" means in numbers rather than words.
+
+**Reflection**
+What this project says about me as an AI engineer?:
+
+-This project identifies my progressive thinking when it comes to designing systems. In this project, i had the option to choose between three Ai implementation features namely: RAG, Agentic workflow, Fine-tuned or specialized model and Reliability or Testing systems. I made sure my approach identified the prons and cons to on each feature and the time trade offs too. I finally was able to use Reliability or Testing systems. 
+
+Decisions like this require a flexible way of thinking when it comes to approaching problems. As an AI engineer, I was able to utilize AI models to achieve most tasks, understand codes and reduce time cost. 

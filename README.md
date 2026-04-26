@@ -387,3 +387,13 @@ Before the Module 4 reliability upgrade:
 
 All four gaps are closed in the current version.
 ---
+**Reflection**
+What this project says about me as an AI engineer?:
+
+-This project identifies my progressive thinking when it comes to designing systems. In this project, i had the option to choose between three Ai implementation features namely: RAG, Agentic workflow, Fine-tuned or specialized model and Reliability or Testing systems. I made sure my approach identified the prons and cons to on each feature and the time trade offs too. I finally was able to use Reliability or Testing systems. 
+
+Decisions like this require a flexible way of thinking when it comes to approaching problems. As an AI engineer, I was able to utilize AI models to achieve most tasks, understand codes and reduce time cost. 
+
+
+**LOOM LINK**
+https://www.loom.com/share/9adbde8fbd674b4199e86490e4a5d19d
