@@ -1,6 +1,14 @@
 from __future__ import annotations
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("pawpal")
 
 @dataclass
 class Pet:
@@ -40,6 +48,26 @@ class Task:
     completion_status: str = "pending"  # "pending", "completed", "in_progress"
     pet_name: str = ""  # Name of the pet this task belongs to
     due_date: datetime = None  # Due date for the task
+
+    def __post_init__(self):
+        _VALID_PRIORITIES = {"high", "medium", "low"}
+        _VALID_FREQUENCIES = {"daily", "weekly", "once"}
+        _VALID_STATUSES = {"pending", "completed", "in_progress"}
+
+        if self.duration <= 0:
+            raise ValueError(f"Task duration must be positive, got {self.duration}")
+        if self.priority not in _VALID_PRIORITIES:
+            raise ValueError(f"Priority must be one of {_VALID_PRIORITIES}, got '{self.priority}'")
+        if self.frequency not in _VALID_FREQUENCIES:
+            raise ValueError(f"Frequency must be one of {_VALID_FREQUENCIES}, got '{self.frequency}'")
+        if self.completion_status not in _VALID_STATUSES:
+            raise ValueError(f"Completion status must be one of {_VALID_STATUSES}, got '{self.completion_status}'")
+        try:
+            h, m = map(int, self.time.split(':'))
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError()
+        except ValueError:
+            raise ValueError(f"Time must be HH:MM format (00:00–23:59), got '{self.time}'")
 
     def update_priority(self, new_priority: str):
         """Update the task's priority."""
@@ -163,39 +191,54 @@ class Schedule:
     def mark_task_complete(self, task: Task):
         """Mark a task as completed and create recurring task if applicable."""
         task.update_completion_status("completed")
-        
-        # Create new recurring task if applicable
+        logger.info("Task completed: '%s' (%s)", task.name, task.pet_name)
+
         new_task = task.create_recurring_task()
         if new_task:
-            # Find the pet and add the new task
             for pet in self.owner.pets:
                 if pet.name == task.pet_name:
                     pet.add_task(new_task)
+                    logger.info(
+                        "Recurring task queued: '%s' due %s",
+                        new_task.name,
+                        new_task.due_date.strftime("%Y-%m-%d") if new_task.due_date else "unknown",
+                    )
                     break
 
     def detect_time_conflicts(self):
-        """Detect and return warnings for tasks scheduled at the same time.
-        
+        """Detect overlapping task windows using start-time + duration.
+
         Returns:
-            List of warning messages for conflicting tasks
+            List of warning messages for each pair of conflicting tasks
         """
         warnings = []
         tasks = self.get_all_pet_tasks()
-        
-        # Group tasks by time
-        time_groups = {}
-        for task in tasks:
-            if task.time not in time_groups:
-                time_groups[task.time] = []
-            time_groups[task.time].append(task)
-        
-        # Check for conflicts
-        for time_slot, task_list in time_groups.items():
-            if len(task_list) > 1:
-                task_names = [f"{task.name} ({task.pet_name})" for task in task_list]
-                warning = f"⚠️  TIME CONFLICT at {time_slot}: {', '.join(task_names)} are scheduled simultaneously"
-                warnings.append(warning)
-        
+
+        def time_to_minutes(t):
+            h, m = map(int, t.split(':'))
+            return h * 60 + m
+
+        for i in range(len(tasks)):
+            for j in range(i + 1, len(tasks)):
+                t1, t2 = tasks[i], tasks[j]
+                start1 = time_to_minutes(t1.time)
+                end1 = start1 + t1.duration
+                start2 = time_to_minutes(t2.time)
+                end2 = start2 + t2.duration
+                if start1 < end2 and start2 < end1:
+                    end1_str = f"{end1 // 60:02d}:{end1 % 60:02d}"
+                    end2_str = f"{end2 // 60:02d}:{end2 % 60:02d}"
+                    msg = (
+                        f"⚠️  TIME CONFLICT: {t1.name} ({t1.pet_name}) "
+                        f"{t1.time}–{end1_str} overlaps with "
+                        f"{t2.name} ({t2.pet_name}) {t2.time}–{end2_str}"
+                    )
+                    warnings.append(msg)
+                    logger.warning("Conflict detected — %s vs %s at %s/%s",
+                                   t1.name, t2.name, t1.time, t2.time)
+
+        if not warnings:
+            logger.info("Conflict check passed — no overlapping tasks")
         return warnings
 
     def add_task(self, task: Task):
@@ -214,6 +257,57 @@ class Schedule:
         """Calculate total time used and remaining time."""
         self.total_time_used = sum(task.duration for task in self.tasks)
         self.remaining_time = self.owner.available_time_per_day - self.total_time_used
+        if self.remaining_time < 0:
+            logger.warning(
+                "Schedule overbooked by %d min (used %d / available %d)",
+                abs(self.remaining_time), self.total_time_used, self.owner.available_time_per_day,
+            )
+
+    def generate_reliability_report(self) -> dict:
+        """Score the schedule's reliability on a 0.0–1.0 scale.
+
+        Deductions:
+          - 0.15 per conflict pair (max 0.45 total from conflicts)
+          - 0.20 if schedule is overbooked
+          - 1.0 → 0.0 if no tasks are scheduled at all
+
+        Returns a dict with keys: confidence, task_count, conflict_count,
+        total_time, available_time, issues, summary.
+        """
+        tasks = self.get_all_pet_tasks()
+        conflicts = self.detect_time_conflicts()
+        total_time = sum(t.duration for t in tasks)
+        issues = []
+        score = 1.0
+
+        if not tasks:
+            score = 0.0
+            issues.append("No tasks scheduled")
+        else:
+            if conflicts:
+                deduction = min(0.45, len(conflicts) * 0.15)
+                score -= deduction
+                issues.append(f"{len(conflicts)} overlapping task pair(s) detected")
+            if total_time > self.owner.available_time_per_day:
+                score -= 0.20
+                overage = total_time - self.owner.available_time_per_day
+                issues.append(f"Overbooked by {overage} min")
+
+        score = round(max(0.0, score), 2)
+        status = "Schedule looks reliable" if not issues else "; ".join(issues)
+        summary = f"Confidence {score:.0%} — {status}"
+
+        logger.info("Reliability report: confidence=%.2f, conflicts=%d, overbooked=%s",
+                    score, len(conflicts), total_time > self.owner.available_time_per_day)
+        return {
+            "confidence": score,
+            "task_count": len(tasks),
+            "conflict_count": len(conflicts),
+            "total_time": total_time,
+            "available_time": self.owner.available_time_per_day,
+            "issues": issues,
+            "summary": summary,
+        }
 
     def display_schedule(self):
         """Print the daily schedule details."""
