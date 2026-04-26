@@ -2,7 +2,6 @@ import pytest
 from datetime import datetime, timedelta
 from pawpal_system import PetOwner, Pet, Task, Schedule
 
-
 # ============================================================
 # CORE FUNCTIONALITY
 # ============================================================

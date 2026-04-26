@@ -136,17 +136,38 @@ if st.button("📋 Generate Schedule", use_container_width=True):
     if all_pet_tasks:
         st.success("✅ Schedule generated successfully!")
         
+        # ============ RELIABILITY REPORT ============
+        report = schedule.generate_reliability_report()
+        confidence = report["confidence"]
+
+        st.markdown("### 🔍 Schedule Reliability")
+        col_score, col_summary = st.columns([1, 3])
+        with col_score:
+            st.metric("Confidence Score", f"{confidence:.0%}")
+            st.progress(confidence)
+        with col_summary:
+            if confidence == 1.0:
+                st.success(f"**{report['summary']}**")
+            elif confidence >= 0.7:
+                st.warning(f"**{report['summary']}**")
+            else:
+                st.error(f"**{report['summary']}**")
+            if report["issues"]:
+                for issue in report["issues"]:
+                    st.markdown(f"- {issue}")
+
         # ============ CONFLICTS WARNING (PROMINENT) ============
-        conflicts = schedule.detect_time_conflicts()
-        if conflicts:
+        conflicts = report["conflict_count"]
+        all_conflicts = schedule.detect_time_conflicts()
+        if all_conflicts:
             with st.container(border=True):
                 st.error("⚠️ **SCHEDULE CONFLICTS DETECTED**")
-                for conflict in conflicts:
+                for conflict in all_conflicts:
                     st.markdown(f"- {conflict}")
         else:
             with st.container(border=True):
                 st.info("✅ **No time conflicts detected** — All tasks can run in parallel!")
-        
+
         # ============ SUMMARY METRICS ============
         st.markdown("### 📊 Schedule Summary")
         col1, col2, col3, col4 = st.columns(4)

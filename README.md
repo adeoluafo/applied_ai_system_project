@@ -96,21 +96,74 @@ Owner Info + Pet Info
 
 ```mermaid
 flowchart TD
-    A[User Inputs Owner + Pet Info] --> B[Streamlit UI]
-    B --> C[Task Manager\nvalidates inputs on creation]
-    C --> D[Schedule Engine]
-    D --> E[sort_by_time]
-    D --> F[calculate_total_time]
-    D --> G[detect_time_conflicts\nduration-aware pairwise]
-    D --> H[mark_task_complete\nauto-recurrence]
-    E --> I[Final Daily Plan]
-    F --> I
-    G --> I
-    H --> I
-    I --> J[Display to User]
-    K[58 Pytest Tests] -.validates.-> D
-    K -.validates.-> G
-    K -.validates.-> C
+
+    subgraph UI["UI Layer — app.py"]
+        A1[Owner Info] & A2[Pet Info] & A3[Task Details]
+        A4([Generate Schedule])
+    end
+
+    subgraph VAL["Input Validator — Task.__post_init__"]
+        V1{Valid?\npriority · frequency\nduration · time format}
+    end
+
+    subgraph STORE["Session Store — st.session_state"]
+        S1[(PetOwner + Pets + Tasks)]
+    end
+
+    subgraph ENGINE["Schedule Engine — Schedule class"]
+        E1[Retrieval: get_all_pet_tasks]
+        E2[Sort: sort_by_time]
+        E4[Capacity: calculate_total_time]
+        E5[Conflict Detector: detect_time_conflicts]
+        E6[Recurrence: mark_task_complete]
+    end
+
+    subgraph EVAL["Reliability Evaluator — generate_reliability_report"]
+        R1[Confidence Score 0.0–1.0]
+        R2[Issue List + Summary]
+    end
+
+    subgraph LOG["Logger — pawpal logger"]
+        L1[INFO: completions · recurring tasks · report]
+        L2[WARNING: conflicts · overbooking]
+    end
+
+    subgraph OUT["Output — Streamlit Display"]
+        O1[Reliability Score + Bar]
+        O2[Conflict Warnings]
+        O3[Sorted Schedule Table]
+        O4[Capacity Indicator]
+        O5[Per-pet Breakdown]
+    end
+
+    subgraph TEST["Test Suite — pytest tests/"]
+        T2[64 tests: sorting · recurrence\nconflicts · validation · confidence]
+    end
+
+    A1 & A2 --> STORE
+    A3 --> VAL
+    VAL -->|valid| STORE
+    VAL -->|invalid| ERR[ValueError]
+
+    A4 --> E1
+    STORE --> E1
+    E1 --> E2 & E4 & E5 & E6
+    E6 -->|new recurring task| STORE
+
+    E1 & E4 & E5 --> EVAL
+    R1 & R2 --> O1
+    E5 --> O2
+    E2 --> O3
+    E4 --> O4
+    E1 --> O5
+
+    E6 --> L1
+    EVAL --> L1
+    E5 & E4 --> L2
+
+    T2 -. validates .-> VAL
+    T2 -. validates .-> ENGINE
+    T2 -. validates .-> EVAL
 ```
 
 ---
@@ -333,87 +386,4 @@ Before the Module 4 reliability upgrade:
 - There was no machine-readable score of how reliable a generated schedule actually was.
 
 All four gaps are closed in the current version.
-
-### What I learned
-
-Writing tests before finding the blind spots forced me to think about what the code actually promises, not just what it does in the happy path. The duration-overlap bug had existed since the original implementation but was invisible because all early tests used identical start times. Writing a new scenario-driven test (`test_detect_duration_based_overlap`) was what revealed it — the production fix followed in two lines.
-
-Confidence scoring turned out to be more useful than I expected. A score of 0.85 communicates more to an owner than a list of warning strings, and testing the score forced me to define what "reliable" means in numbers rather than words.
-
 ---
-
-## Reflection
-
-### What this project taught me about AI
-
-Working on PawPal+ changed how I think about the role of AI in software development. The most valuable use was not generating code — it was using AI as a design sounding board. Describing a scheduling problem in natural language and getting back a structured class diagram helped me identify responsibilities I had not thought to separate (for example, keeping `Task.create_recurring_task()` as a method on `Task` rather than inside `Schedule`, which made it independently testable).
-
-The moment I learned the most from was when an AI suggestion introduced a subtle bug: it grouped conflict detection by start time, which looked correct for the test cases I had at the time but missed duration-overlap conflicts entirely. Catching this required understanding the real-world semantics of the problem (two tasks can't physically happen at the same time even if they start at different times) rather than just reading the code. That distinction — between code that passes tests and code that solves the actual problem — is something only human judgment can provide.
-
-### What I would improve next
-
-1. **Priority-weighted scheduler**: Implement a greedy or knapsack-style algorithm that, when the owner is overbooked, automatically selects the highest-value subset of tasks that fits within available time — surfacing what gets dropped and why.
-2. **Persistent storage**: Replace in-memory session state with a lightweight database (SQLite via SQLModel) so schedules survive page refreshes and can be reviewed across days.
-3. **Streamlit UI tests**: Use `streamlit.testing.v1` to write integration tests that simulate button clicks and verify that the rendered output matches the domain model's state.
-4. **Natural language task entry**: Let owners type "walk Buddy for 30 minutes at 8am every day" and parse it into a structured `Task` — a practical use of an LLM as a parsing layer rather than a reasoning engine.
-
-### Final takeaway
-
-Reliability is not a feature you bolt on after the fact — it is a property you design for. Adding `Task.__post_init__` validation, duration-aware conflict detection, structured logging, a confidence-scoring engine, and a fixture-backed test suite did not change what PawPal+ does; it changed how confidently — and measurably — I can say it does it correctly.
-
-### What are the limitations or biases in your system?
-
-**Scheduling biases**
-
-- `sort_by_time()` orders tasks chronologically, not by priority. A low-priority playtime at 07:00 always appears before a high-priority medication at 12:00 — the schedule never reorders to surface urgent tasks first.
-- Tasks created without an explicit time default to `"00:00"`, so they silently sort first in the daily view even though they have no real scheduled time.
-- Conflict detection flags overlaps but never suggests a resolution or alternative slot. The owner must figure out manually where to move a conflicting task.
-- The system assumes zero multitasking. Two tasks that could realistically overlap (e.g., a 5-min medication while food is cooking) receive the same conflict warning as genuinely impossible simultaneous tasks.
-
-**Confidence scoring biases**
-
-- The −0.15/conflict and −0.20/overbooked deductions are arbitrary heuristics, not derived from data or user research.
-- Penalties are priority-blind: a conflict between two "low" priority grooming tasks deducts the same amount as a conflict involving a "high" priority medication.
-- An empty schedule scores 0.0, which conflates a legitimate rest day with a broken schedule.
-
-### Could your AI be misused, and how would you prevent that?
-
-**Yes —realistic misuse vectors exist in the current system.**
-
-**1. Medical over-trust in the confidence score**
-
-`generate_reliability_report()` scores 1.0 when there are no scheduling conflicts and the schedule fits within available time. A user could see "Confidence 100%" on a medication schedule and interpret that as veterinary assurance the timing is safe — when the system has no knowledge of dosing intervals, drug interactions, or species-specific care requirements. A task named "Insulin injection" at the wrong interval scores 1.0 if it has no time conflict.
-
-*Prevention:* The confidence score description in the UI should explicitly state what it measures ("no overlapping time windows, within daily capacity") and carry a disclaimer: *"This schedule is a time-management tool only — consult a veterinarian for medical task timing."*
-
-### What surprised you while testing your AI's reliability?
-
-**1. Twenty passing tests hid a real bug.**
-
-The original test suite had 20 tests and all of them passed. That felt like strong coverage — until writing `test_detect_duration_based_overlap`, which created a 60-minute walk at 08:00 and a feeding at 08:30. The original `detect_time_conflicts()` reported no conflict because it only grouped tasks by identical start time. The bug had existed since the first commit and no existing test caught it because every conflict test happened to use the same start time. Passing tests and correct behavior turned out to be two different things.
-
-**2. Fixing the conflict detector broke a different test.**
-
-After switching to pairwise window comparison, `test_detect_three_way_conflict` — a test that had passed before — suddenly failed. The old grouped-message format put all three conflicting task names in a single string; the new pairwise format produces one warning per pair, so `conflicts[0]` only contained two names. The test was accidentally testing the *format* of the output rather than the *behavior* it claimed to test. Rewriting it to check `" ".join(conflicts)` made it genuinely test what it said it was testing.
-
-**3. A schedule can score 1.0 and still be wrong.**
-
-`test_reliability_report_perfect_schedule` passes with `confidence == 1.0` for a walk at 08:00 and a feed at 12:00. But the same score appears if those two tasks were "Insulin — 2 units" and "Insulin — 2 units" scheduled two hours apart, which could be dangerous dosing for many animals. The score measures scheduling geometry, not care quality. That distinction was obvious in hindsight but not obvious while building the scorer.
-
-**4. Invalid inputs failed silently for the entire original implementation.**
-
-Before adding `Task.__post_init__`, creating `Task("Walk", -5, "ASAP", "exercise", "monthly")` produced a valid Python object with no error. That object would then sort, filter, and appear in conflict detection results — with a negative duration that subtracted from capacity calculations and a frequency that `create_recurring_task()` would never match. Writing the 17 parametrized validation tests revealed that the system had been accepting corrupt data from the start without any indication that anything was wrong.
-
-
-
-### AI Collaboration
-
-AI was used throughout this project for three distinct purposes: initial class design, debugging logic errors, and generating test scaffolding. The most effective prompting technique was using the `#` symbol to reference specific files directly — asking the AI to look at `#pawpal_system.py` and suggest improvements produced far more precise responses than describing the code in prose.
-
-**One instance where the AI gave a helpful suggestion**
-
-During the Module 4 upgrade, I asked the AI how to eliminate the boilerplate setup code that appeared at the top of every test — each test was constructing a `PetOwner`, a `Pet`, and a `Task` from scratch before doing anything meaningful. The AI suggested creating a `tests/conftest.py` file with pytest fixtures scoped to the function level, so each test receives a guaranteed-fresh object as an argument rather than building it manually. This was the right call. It reduced the average test from ~10 lines to ~4, made each test's dependencies explicit in its signature, and meant that adding a new test scenario required almost no setup code. I accepted the suggestion and it improved the entire test suite.
-
-**One instance where the AI suggestion was flawed or incorrect**
-
-The original `detect_time_conflicts()` implementation — which the AI helped design — grouped all tasks by their start time string and flagged any group with more than one task. This looked correct and passed all the conflict tests at the time. The flaw was that it only caught tasks scheduled at the *identical* start time. A 60-minute walk at 08:00 and a feeding at 08:30 — tasks that physically cannot both be done simultaneously — produced no warning at all.
